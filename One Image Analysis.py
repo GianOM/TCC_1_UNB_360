@@ -57,7 +57,7 @@ options = vision.FaceLandmarkerOptions(base_options=base_options,
 detector = vision.FaceLandmarker.create_from_options(options)
 
 # ----------------------------------------------CARREGAR A IMAGEM AQUI-------------------------------------------------------
-image = mp.Image.create_from_file("Dan.jpg")
+image = mp.Image.create_from_file("business-person.png")
 #-----------------------------------------------------------------------------------------------------------------------------
 
 
