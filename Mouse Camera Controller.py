@@ -3,6 +3,8 @@ import time
 import cv2
 import numpy as np
 
+import subprocess #Usado para rodar a linha de comando
+
 def eqruirect2persp(img, FOV, THETA, PHI, Height_Output, Widht_Output):
 
     # THETA is left/right angle, PHI is up/down angle, both in degree
@@ -50,7 +52,6 @@ def eqruirect2persp(img, FOV, THETA, PHI, Height_Output, Widht_Output):
     return persp
 
 
-# Function to draw a rectangle on each frame of a video
 def draw_rectangle_on_video(video_path):
     # Load the video
     cap = cv2.VideoCapture(video_path)
@@ -61,7 +62,7 @@ def draw_rectangle_on_video(video_path):
 
     cv2.setWindowProperty('Frame with Rectangle', cv2.WND_PROP_TOPMOST, 1)#Configura a janela para aparecer assim a outra janela é fechada
 
-    frame_delay = int(1000 / 30)
+    frame_delay = int(1000 / metadata.get('frame_rate'))
 
     idx_gaze_Map = 0
 
@@ -70,8 +71,12 @@ def draw_rectangle_on_video(video_path):
     FOV_pxls_X = int( (Campo_de_Visao * 1920) / 360)
 
     #FOV_Y = np.radians(2 * np.arctan(1 / Campo_de_Visao))
+
+    #As projeçoes equiretangulares não possuem a altura 1080. Para isto, verificou empiricamente a necessidade de corrigir a partir deste erro
+    #TO DO: Justificar melhor a variável abaixo
+    Height_Error =  metadata.get('Height') - 1080
         
-    FOV_pxls_Y = int(1.1 * FOV_pxls_X * 9 / 16)
+    FOV_pxls_Y = int(1.1 * FOV_pxls_X * metadata.get('Height') / metadata.get('Width'))
 
     while cap.isOpened():
         # Read the frame
@@ -87,8 +92,8 @@ def draw_rectangle_on_video(video_path):
 
         #Por Fim, somamos e subtraimos o CTU para efeito de padding
 
-        x_0, y_0 = (vector[0][idx_gaze_Map] - FOV_pxls_X // 2, vector[1][idx_gaze_Map] - 60 - FOV_pxls_Y // 2)  
-        x_1, y_1 = (vector[0][idx_gaze_Map] + FOV_pxls_X // 2, vector[1][idx_gaze_Map] - 60 + FOV_pxls_Y // 2) 
+        x_0, y_0 = (Gaze_Map[0][idx_gaze_Map] - FOV_pxls_X // 2, Gaze_Map[1][idx_gaze_Map] + Height_Error - FOV_pxls_Y // 2)  
+        x_1, y_1 = (Gaze_Map[0][idx_gaze_Map] + FOV_pxls_X // 2, Gaze_Map[1][idx_gaze_Map] + Height_Error + FOV_pxls_Y // 2) 
 
         # cv2.rectangle(image, start_point,
         #                        end_point,
@@ -102,7 +107,7 @@ def draw_rectangle_on_video(video_path):
 
         if x_0 < 0:
             #O retangulo sai da tela pra esquerda
-            x_0 = 1920 + x_0
+            x_0 = metadata.get('Width') + x_0
             x_1 = x_0 + FOV_pxls_X
             cv2.rectangle(frame, (x_0, y_0),
                                  (x_1, y_1),
@@ -111,26 +116,26 @@ def draw_rectangle_on_video(video_path):
         if y_0 < 0:
 
             #O retangulo sai da tela pra cima
-            y_0 = 960 + y_0
+            y_0 = metadata.get('Height') + y_0
             y_1 = y_0 + FOV_pxls_Y
             cv2.rectangle(frame, (x_0, y_0),
                                  (x_1, y_1),
                                  (0, 0, 255), 4)
 
-        if x_1 > 1920:
+        if x_1 > metadata.get('Width'):
 
             #O retangulo sai da tela pra direita
-            x_1 = x_1 - 1920
+            x_1 = x_1 - metadata.get('Width')
             x_0 = x_1 - FOV_pxls_X
 
             cv2.rectangle(frame, (x_0, y_0),
                                  (x_1, y_1),
                                  (0, 0, 255), 4)
 
-        if y_1 > 960:
+        if y_1 > metadata.get('Height'):
 
             #O retangulo sai da tela pra baixo        
-            y_1 = y_1 - 960
+            y_1 = y_1 - metadata.get('Height')
             y_0 = y_1 - FOV_pxls_Y
 
             cv2.rectangle(frame, (x_0, y_0),
@@ -187,25 +192,22 @@ def Automatic_Video(video_path, tempo):
 
     VLC_Ponto_de_Vista.contents.field_of_view = Campo_de_Visao
     
-    #vlc.libvlc_video_update_viewpoint(player, VLC_Ponto_de_Vista, True) -> Se o ultimo parametro for true, ele troca o viewpoint. Se for false, ele soma ou
-    #                                                             subtrai o viewpoint
-
-    vlc.libvlc_video_update_viewpoint(player, VLC_Ponto_de_Vista, True)
-    
     #Grave o movimento do mouse
     for i in range(tempo):   
 
-        x, y = vector[0][i], vector[1][i] = player.video_get_cursor()
+        x, y = Gaze_Map[0][i], Gaze_Map[1][i] = player.video_get_cursor()
 
-        #DEBUG TOOL BELOW 
-        #x, y = vector[0][i], vector[1][i] = 960, 540
+        #DEBUG TOOL:
+        #x, y = vector[0][i], vector[1][i] = metadata.get('resolution')[0], metadata.get('resolution')[1]
 
         VLC_Ponto_de_Vista.contents.yaw = map_value(x, x_min, x_max, yaw_min, yaw_max) # -> Equivale a rodar a cabeça da esquerda para direita
         VLC_Ponto_de_Vista.contents.pitch =  map_value(y, y_min, y_max, pitch_min, pitch_max) # -> Equivale a rodar a cabeça para cima e para baixo
 
         vlc.libvlc_video_update_viewpoint(player, VLC_Ponto_de_Vista, True)
+        #vlc.libvlc_video_update_viewpoint(player, VLC_Ponto_de_Vista, True) -> Se o ultimo parametro for true, ele troca o viewpoint. Se for false, ele soma ou
+        #                                                                       subtrai o viewpoint
 
-        time.sleep(1/30)
+        time.sleep(1/metadata.get('frame_rate'))
 
     player.release()
     instance.release()
@@ -237,31 +239,66 @@ def draw_grid(img, density):
     return img
 
 
+def set_Video_360_Metada(media):
+
+    subprocess.run(['exiftool', '-XMP-GSpherical:Spherical="true', media])
+    subprocess.run(['exiftool', '-XMP-GSpherical:Stitched="true', media])
+    subprocess.run(['exiftool', '-XMP-GSpherical:StitchingSoftware="Spherical Metadata Tool', media])
+    subprocess.run(['exiftool', '-XMP-GSpherical:ProjectionType="equirectangular', media])
+
+
+def get_video_metadata(video_path):
+
+    command = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,r_frame_rate,duration', '-of', 'default=nw=1:nk=1', video_path]
+    result = subprocess.run(command, capture_output=True, text=True)
+    
+    metadata = {}
+    
+    output_lines = result.stdout.strip().split('\n')
+    
+    metadata['Width'] = int(output_lines[0])
+    metadata['Height'] = int(output_lines[1])
+    
+    # Convert framerate to integer
+    metadata['frame_rate'] = eval(output_lines[2])
+    
+    # Convert duration to float
+    metadata['duration'] = float(output_lines[3])
+    
+    return metadata
+
+
+
 #--------------------------------------------------------------Código começa aqui --------------------------------------------------------------------------------------------------
 
+input_video = '18_360_Carnival_of_Venice_Italy_4k_video.mp4'
 
-#Levando em consideração que esta mídia possui 30fps
-Numero_de_Frames = 10 * 30 #Segundos x Frame/Segundo
+metadata = get_video_metadata(input_video)
+
+set_Video_360_Metada(input_video)
+
+#Numero_de_Frames = Segundos x Frame/Segundo
+
+Numero_de_Frames = int(metadata.get('duration') * metadata.get('frame_rate'))
 
 gaze_Map_X = [0 for _ in range(Numero_de_Frames)]
 gaze_Map_Y = [0 for _ in range(Numero_de_Frames)]
 
-vector = [gaze_Map_X, gaze_Map_Y]
+Gaze_Map = [gaze_Map_X, gaze_Map_Y]
 
 Campo_de_Visao = 90
 
 #Coding Tree Unit
 CTU = 0
 
-video_path = "bavarian_alps_wimbachklamm_360.mp4"
+Automatic_Video(input_video, Numero_de_Frames)
 
+draw_rectangle_on_video(input_video)
 
-Automatic_Video(video_path, Numero_de_Frames)
-
-draw_rectangle_on_video('bavarian_alps_wimbachklamm_Equiretangular.mp4')
 
 '''
-cap = cv2.VideoCapture("bavarian_alps_wimbachklamm_Equiretangular.mp4")
+
+cap = cv2.VideoCapture(input_video)
 
 # Read and display video frames in a loop
 while True:
@@ -455,5 +492,4 @@ while True:
         break
 
 cv2.destroyAllWindows()
-
 '''
