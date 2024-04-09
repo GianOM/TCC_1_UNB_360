@@ -74,7 +74,7 @@ def draw_rectangle_on_video(video_path):
 
     #As projeçoes equiretangulares não possuem a altura 1080. Para isto, verificou empiricamente a necessidade de corrigir a partir deste erro
     #TO DO: Justificar melhor a variável abaixo
-    Height_Error =  metadata.get('Height') - 1080
+    Height_Error =  int((metadata.get('Height') - 1080) / 2)
         
     FOV_pxls_Y = int(1.1 * FOV_pxls_X * metadata.get('Height') / metadata.get('Width'))
 
@@ -278,7 +278,6 @@ metadata = get_video_metadata(input_video)
 set_Video_360_Metada(input_video)
 
 #Numero_de_Frames = Segundos x Frame/Segundo
-
 Numero_de_Frames = int(metadata.get('duration') * metadata.get('frame_rate'))
 
 gaze_Map_X = [0 for _ in range(Numero_de_Frames)]
