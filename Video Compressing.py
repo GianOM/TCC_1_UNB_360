@@ -29,11 +29,21 @@ def get_video_metadata(video_path):
 
 
 #--------------------------------------------------------------Código começa aqui --------------------------------------------------------------------------------------------------
+'''
+#Faz o scaling de um arquivo h265 para 1920x960
+input_h265_file = "C:\TCC\AR and VR\Videos\SJTU 8K 360-Degree Video Sequences H265 Lossless\SiyuanGate.h265"
+output_mp4_h265_file = "SiyuanGate.mp4"
+
+subprocess.run(['ffmpeg', '-y' ,'-i', input_h265_file,
+                '-vf',  "scale=1920:960:flags=lanczos", '-c:v', 'hevc', "-x265-params", "lossless=1",
+                                                    '-r',  '25', '-pix_fmt', 'yuv420p', output_mp4_h265_file])
+'''
+
 
 # Define the input and output video file names
 input_video = "SiyuanGate.mp4"
 output_video_ROI = 'Compressed_Video_ROI.mp4'
-output_video_default = 'Compressed_Video.mp4'
+output_video_fixed_QP = 'Compressed_Video.mp4'
 
 
 Regioes_de_Interesse = []
@@ -74,10 +84,11 @@ Numero_de_Frames = 1080
 time_window = (43.2//Quantidade_Gaze_Atlas)
 
 #Cria N divisões originais do vídeo
-for i in range(Quantidade_Gaze_Atlas):
+#Substituir o Range por Quantidade_Gaze_Atlas
+for i in range(1):
     
-    output_file_ROI = os.path.join(Intermediate_Files_Folder, f"Chunk_ROI_{i}.mp4")
-    output_file_Default = os.path.join(Intermediate_Files_Folder, f"Chunk_Default_{i}.mp4")
+    output_file_ROI = os.path.join(Intermediate_Files_Folder, f"ROI_Encoded_{i}.mp4")
+    output_file_Default = os.path.join(Intermediate_Files_Folder, f"Fixed_QP_{i}.mp4")
 
     '''
     #A forma geral do input_videos_after_compression é : ['-i', "Chunk0.mp4", '-i', "Chunk1.mp4", '-i', "Chunk2.mp4",...]
@@ -92,10 +103,24 @@ for i in range(Quantidade_Gaze_Atlas):
     #Força todos os frames a serem I-Slices se for 1
     #Somente o primeiro frame será um I-slice se for -1
     '''
+    # bframes=0 -> 0 bframes consecutivos
+    # rd = 2 -> Rate distortion optmizitation. Quanto maior este valor, mais tempo demora-se para codificar
+    # CTU = 16 -> Maximum CTU size
+    # min-cu-size = 16 -> Minimum CTU Size
+    # rc-lookahead = 0
+    # frame-threads=1
+    #Resultado Atual: 20.125714285714285 ms
+
     command = [
         "ffmpeg",'-y', "-ss", str(time_window * i), "-t", str(time_window), "-i", input_video,
-        "-c:v", "libx265", "-preset", Video_General_Preset,'-x265-params', f'qpmin=27:qpmax=35:csv-log-level=2:csv=Encode_Stat_ROI_{i}.csv','-vf', Regioes_de_Interesse[i], output_file_ROI,
-        '-c:v', 'libx265', '-preset', Video_General_Preset,'-x265-params',f'csv-log-level=2:csv=Encode_Stat_Original_{i}.csv', output_file_Default
+        "-c:v", "libx265",'-x265-params', f'qpmin=28:qpmax=36:deblock=6: min-cu-size=8:ctu=64:rd=6:bframes=0:rc-lookahead=0:frame-threads=1: psnr=1:ssim=1:csv-log-level=2:csv=Encode_ROI_Log_{i}.csv',
+        '-vf', Regioes_de_Interesse[i] , output_file_ROI
+    ]
+    subprocess.run(command)
+
+    command = [
+        "ffmpeg",'-y', "-ss", str(time_window * i), "-t", str(time_window), "-i", input_video,
+        '-c:v', 'libx265','-x265-params',f'qp=32:csv-log-level=2:psnr=1:ssim=1:csv=Encode_Fixed_QP_Log_{i}.csv', output_file_Default
     ]
     subprocess.run(command)
 
@@ -111,8 +136,6 @@ comando = ["ffmpeg",'-filter_complex', Concat_Video,
 ]
 #INSERE O VIDEO INPUTS NA SEGUNDA POSIÇÃO DO ARRAY COMANDO
 comando[1:1] = input_videos_after_compression
-
-subprocess.run(comando)
 
 
 #Toda vez que rodamos o filtro complexo, mesmo tentando mapear o side data, perdemos o metadado que informa que

@@ -5,10 +5,7 @@ import numpy as np
 
 import os#Usado para ler e escrever os arquivos nas pastas corretas
 
-from threading import Thread # library for implementing multi-threaded processing
-from queue import Queue
-
-import cProfile
+import cProfile#Usado para profiling do código e debuggar bottlenecks
 import subprocess #Usado para rodar a linha de comando
 
 def Calculate_Atlas_per_Frame(M, N, index_Atlas, Atlas, X_Center, Y_Center):
@@ -35,8 +32,6 @@ def Calculate_Heat_Map(video_path, Atlas):
     #FOV_pxls_Y = int(FOV_pxls_X * metadata.get('Height') / metadata.get('Width'))
 
     #FOV_Y = np.radians(2 * np.arctan(1 / Campo_de_Visao)) -> O VLC calcula o FOV vertical em pixels a partir desta formula
- 
-
     idx_Atlas = 0
 
     # Load the video
@@ -71,10 +66,12 @@ def Calculate_Heat_Map(video_path, Atlas):
         if (frame_number_i + 1 == ((Numero_de_Frames // K) * (idx_Atlas + 1))):
 
             success, frame = captura_de_video.retrieve_frame()
-
+            '''
             Distancia_Maxima = np.max(Atlas[:, :, idx_Atlas])
             Atlas[:, :, idx_Atlas] = Atlas[:, :, idx_Atlas] / Distancia_Maxima
             Atlas[:, :, idx_Atlas] = np.round(Atlas[:, :, idx_Atlas], decimals=3)
+            '''
+            Normalize_Atlas(Gaze_Atlas, idx_Atlas)
 
             Draw_Atlas(M,N,idx_Atlas, Gaze_Atlas, frame)
             Create_ROI_Lookup_file(M,N,idx_Atlas, Gaze_Atlas)
@@ -84,16 +81,23 @@ def Calculate_Heat_Map(video_path, Atlas):
     captura_de_video.stop()
     return Atlas
 
+def Normalize_Atlas(Atlas, index_Atlas):
+
+    Distancia_Maxima = np.max(Atlas[:, :, index_Atlas])
+    Atlas[:, :, index_Atlas] = Atlas[:, :, index_Atlas] / Distancia_Maxima
+
+    #Comentar a linha de baixo se estiver o usando o modo automático
+    Atlas[:, :, index_Atlas] = 1 - Atlas[:, :, index_Atlas]
+
+    Atlas[:, :, index_Atlas] = np.round(Atlas[:, :, index_Atlas], decimals=3)
+
+
 
 
 def Draw_Atlas(M, N, index_Atlas, Atlas, Drawing_frame):
     #Recebe um frame do array Lista_de_Frames_para_desenhar e repassa este frame para ser desenhado
-    frame = Drawing_frame
-
-    for i in range(1, M):
-        cv2.line(frame, (i * piece_width, 0), (i * piece_width, metadata.get('Height')), (0, 0, 0), 4)
-    for i in range(1, N):
-        cv2.line(frame, (0, i * piece_height), (metadata.get('Width'), i * piece_height), (0, 0, 0), 4)
+    
+    Drawing_frame = draw_grid(Drawing_frame)
         
     font, font_scale, font_thickness = cv2.FONT_HERSHEY_SIMPLEX, 1, 2
 
@@ -107,17 +111,19 @@ def Draw_Atlas(M, N, index_Atlas, Atlas, Drawing_frame):
             text_size, _ = cv2.getTextSize(str(Atlas[j, k, index_Atlas]), font, font_scale, font_thickness)
             text_width, text_height = text_size
 
-            cv2.putText(frame, str(Atlas[j, k, index_Atlas]), (center_x - text_width // 2, center_y - text_height // 2),
+            cv2.putText(Drawing_frame, str(Atlas[j, k, index_Atlas]), (center_x - text_width // 2, center_y - text_height // 2),
                                  font, font_scale, (0, 0, (1-Atlas[j, k, index_Atlas])*255), font_thickness, cv2.LINE_AA)
-            
+
+        
     #Se escrevermos o arquivo em .jpg -> 41ms pra escrever por frame
     #Já se escrevermos em .bmp -> 6ms pra escrever por frame
+
     file_path = os.path.join(Intermediate_Files_Folder, f'Atlas {(Numero_de_Frames // K) * (index_Atlas)} to {(Numero_de_Frames // K) * (index_Atlas + 1)} frames.bmp')
     #A imagem ta saindo com a resolução 1920x1440, que é a resolução original. Por isto, damos um resize nela
     #cv2.imwrite(file_path, cv2.resize(frame, (1920, 1080)))
-    cv2.imwrite(file_path, frame)
+    cv2.imwrite(file_path, Drawing_frame)
     
-    return frame
+    return Drawing_frame
 
 
 def map_value(value, in_min, in_max, out_min, out_max):
@@ -178,6 +184,79 @@ def Automatic_Video(video_path, tempo):
     player.release()
     instance.release()
 
+def Select_Manual_ROI(video_path):
+    
+
+    captura_de_video = Video_Capturing(video_path)
+    captura_de_video.grab_frame()
+
+    success, frame = captura_de_video.retrieve_frame()
+
+    frame = draw_grid(frame)
+
+    height, width = 960, 1920
+    Back_ground = np.zeros((height, width, 3), dtype=np.uint8)
+
+
+    K_iterator = 0 #Variável usada  para acessar diferentes Gaze_Atlases
+    cv2.namedWindow("Image")
+    cv2.setMouseCallback("Image", mouse_callback, (frame, K_iterator))
+
+    while(K_iterator < K):
+        
+        if (cv2.waitKey(5) & 0xFF) == ord('m'):
+
+            Normalize_Atlas(Gaze_Atlas, K_iterator)
+
+            Draw_Atlas(M,N,K_iterator,Gaze_Atlas,frame)
+
+            Create_ROI_Lookup_file(M,N,K_iterator, Gaze_Atlas)
+
+            K_iterator += 1
+
+            captura_de_video.set_frame(K_iterator * piece_frame_time)
+
+            captura_de_video.grab_frame()
+            success, frame = captura_de_video.retrieve_frame()
+            frame = draw_grid(frame)
+
+            cv2.setMouseCallback("Image", mouse_callback, (frame, K_iterator))
+        cv2.imshow("Image", frame)
+        if cv2.waitKey(5) & 0xFF == 27:
+            break
+
+    captura_de_video.stop()
+
+def mouse_callback(event, x, y, flags, param):
+
+    Old_Image, Final_K = param
+
+    if event == cv2.EVENT_LBUTTONDBLCLK:
+        Tile_X, Tile_Y = (x // piece_width), (y // piece_height)
+
+        overlay = Old_Image.copy()
+        cv2.rectangle(overlay, (Tile_X*piece_width, Tile_Y*piece_height), (Tile_X*piece_width + piece_width, Tile_Y*piece_height + piece_height), (0,0,255), -1)
+        #           Background, Alpha_Background, Foreground, Alpha Foregroun, ????, ?????
+        cv2.addWeighted(overlay, 0.3, Old_Image, 0.7, 0, Old_Image)
+
+        Gaze_Atlas[Tile_X, Tile_Y, Final_K] += 1
+
+
+    elif event == cv2.EVENT_RBUTTONDBLCLK:
+        Old_Image, Final_K = param
+        Final_K += 1
+
+
+
+
+def draw_grid(img):
+    
+    for i in range(1, M):
+        cv2.line(img, (i * piece_width, 0), (i * piece_width, metadata.get('Height')), (0, 0, 0), 4)
+    for i in range(1, N):
+        cv2.line(img, (0, i * piece_height), (metadata.get('Width'), i * piece_height), (0, 0, 0), 4)
+    
+    return img
 
 
 
@@ -241,10 +320,14 @@ class Video_Capturing():
         self.video_capture = cv2.VideoCapture(video_path)        
 
     def grab_frame(self):
+        #Primeiro tu dá um grab, ai depois tu da um retrieve
         self.video_capture.grab()
 
     def retrieve_frame(self):
         return self.video_capture.retrieve()
+    
+    def set_frame(self, frame_number):
+        self.video_capture.set(1, frame_number)
     
     def stop(self):
         self.video_capture.release()
@@ -258,7 +341,7 @@ class Video_Capturing():
 #--------------------------------------------------------------Código começa aqui --------------------------------------------------------------------------------------------------
 
 input_video = "SiyuanGate.mp4"
-set_Video_360_Metada(input_video)
+#set_Video_360_Metada(input_video)
 
 metadata = get_video_metadata(input_video)
 
@@ -280,19 +363,24 @@ Gaze_Map = [gaze_Map_X, gaze_Map_Y]
 
 # Divide o vídeo em MxN regioes e cria uma matrix MxN
 # "K" é o número de "Gaze Atlas" que queremos criar. Podemos ter um Gaze_Atlas para 0 a 30s e outro para 30 a 60s
+# "M" é o número de Colunas
+# "N" é o número de Linhas
 (M, N, K) = 8,8,6
 Gaze_Atlas = np.zeros((M, N, K))
 
 #Tamanho do pedaço da Região de Interesse
 piece_width = metadata.get('Width') // M
 piece_height = metadata.get('Height') // N
+piece_frame_time = Numero_de_Frames // K
 
 
 #Define o campo de visão a ser usado no vídeo
 Campo_de_Visao = 90
 
-Automatic_Video(input_video, Numero_de_Frames)
+Select_Manual_ROI(input_video)
+
+#Automatic_Video(input_video, Numero_de_Frames)
 
 #cProfile.run('Gaze_Atlas = Calculate_Heat_Map(input_video, Gaze_Atlas)')
 
-Gaze_Atlas = Calculate_Heat_Map(input_video, Gaze_Atlas)
+#Gaze_Atlas = Calculate_Heat_Map(input_video, Gaze_Atlas)
