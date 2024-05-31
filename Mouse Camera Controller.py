@@ -184,6 +184,51 @@ def Automatic_Video(video_path, tempo):
     player.release()
     instance.release()
 
+def mouse_callback(event, x, y, flags, param):
+
+    Marked_Image, Clean_Image, Final_K = param
+
+    if event == cv2.EVENT_LBUTTONDOWN:
+
+        Tile_X, Tile_Y = (x // piece_width), (y // piece_height)
+
+        Gaze_Atlas[Tile_X, Tile_Y, Final_K] += 1
+
+        Background_Image = Marked_Image.copy()
+
+        cv2.rectangle(Background_Image, (Tile_X*piece_width, Tile_Y*piece_height), (Tile_X*piece_width + piece_width, Tile_Y*piece_height + piece_height), (0,0,255), -1)
+        cv2.addWeighted(Background_Image, 0.25, Marked_Image, 0.75, 0, Marked_Image)
+
+            
+
+
+    elif event == cv2.EVENT_RBUTTONDOWN:
+
+        Tile_X, Tile_Y = (x // piece_width), (y // piece_height)
+
+        Gaze_Atlas[Tile_X, Tile_Y, Final_K] -= 1
+
+        Another_Temporary_Image = Clean_Image.copy()
+
+        for i in range(M):
+            for j in range(N):
+                z = int(Gaze_Atlas[i, j ,Final_K])
+                if z > 0:
+                    for k in range(z):
+                            Background_Image = Another_Temporary_Image.copy()
+
+                            cv2.rectangle(Background_Image, (i*piece_width, j*piece_height), (i*piece_width + piece_width, j*piece_height + piece_height), (0,0,255), -1)
+
+                            cv2.addWeighted(Background_Image, 0.25, Another_Temporary_Image, 0.75, 0, Another_Temporary_Image)
+
+
+         
+        #Background, Alpha_Background, Foreground, Alpha Foregroun, Gamma, Destination image
+        cv2.addWeighted(Another_Temporary_Image, 1, Marked_Image, 0, 0, Marked_Image)
+        #APARENTEMENTE, ESTE É O UNICO MODO DE PARSE DATA USANDO MOUSE CALLBACKS
+
+                    
+
 def Select_Manual_ROI(video_path):
     
 
@@ -194,23 +239,23 @@ def Select_Manual_ROI(video_path):
 
     frame = draw_grid(frame)
 
-    height, width = 960, 1920
-    Back_ground = np.zeros((height, width, 3), dtype=np.uint8)
-
+    frame_backup = frame.copy()
 
     K_iterator = 0 #Variável usada  para acessar diferentes Gaze_Atlases
+
     cv2.namedWindow("Image")
-    cv2.setMouseCallback("Image", mouse_callback, (frame, K_iterator))
+    cv2.setMouseCallback("Image", mouse_callback, (frame, frame_backup, K_iterator))
 
     while(K_iterator < K):
         
-        if (cv2.waitKey(5) & 0xFF) == ord('m'):
+        if (cv2.waitKey(1) & 0xFF) == ord('m'):
 
             Normalize_Atlas(Gaze_Atlas, K_iterator)
 
             Draw_Atlas(M,N,K_iterator,Gaze_Atlas,frame)
 
-            Create_ROI_Lookup_file(M,N,K_iterator, Gaze_Atlas)
+            #Create_ROI_Lookup_file(M,N,K_iterator, Gaze_Atlas)
+            Create_Kvazaar_ROI(M,N,K_iterator, Gaze_Atlas)
 
             K_iterator += 1
 
@@ -218,33 +263,19 @@ def Select_Manual_ROI(video_path):
 
             captura_de_video.grab_frame()
             success, frame = captura_de_video.retrieve_frame()
-            frame = draw_grid(frame)
 
-            cv2.setMouseCallback("Image", mouse_callback, (frame, K_iterator))
+            frame = draw_grid(frame)
+            frame_backup = frame.copy()
+
+            cv2.setMouseCallback("Image", mouse_callback, (frame, frame_backup, K_iterator))
+
         cv2.imshow("Image", frame)
-        if cv2.waitKey(5) & 0xFF == 27:
+
+        if cv2.waitKey(1) & 0xFF == 27:
             break
 
     captura_de_video.stop()
 
-def mouse_callback(event, x, y, flags, param):
-
-    Old_Image, Final_K = param
-
-    if event == cv2.EVENT_LBUTTONDBLCLK:
-        Tile_X, Tile_Y = (x // piece_width), (y // piece_height)
-
-        overlay = Old_Image.copy()
-        cv2.rectangle(overlay, (Tile_X*piece_width, Tile_Y*piece_height), (Tile_X*piece_width + piece_width, Tile_Y*piece_height + piece_height), (0,0,255), -1)
-        #           Background, Alpha_Background, Foreground, Alpha Foregroun, ????, ?????
-        cv2.addWeighted(overlay, 0.3, Old_Image, 0.7, 0, Old_Image)
-
-        Gaze_Atlas[Tile_X, Tile_Y, Final_K] += 1
-
-
-    elif event == cv2.EVENT_RBUTTONDBLCLK:
-        Old_Image, Final_K = param
-        Final_K += 1
 
 
 
@@ -311,6 +342,26 @@ def Create_ROI_Lookup_file(M,N,i, Atlas):
     with open(file_path, 'w') as file:
         file.write(String_ROI_Text)
 
+def Create_Kvazaar_ROI(M,N,i, Atlas):
+
+    ROI_Text = []
+
+    #A primeira linha contém quantas divisões existirão no eixo X e em seguida no eixo Y
+
+    QP_Offset = 15
+    #Lembre-se: o ROI do Kvazaar é em formato raster
+    for x in range(M):
+        for y in range(N):
+            ROI_Text.append(int(QP_Offset * Atlas[y, x, i]))
+
+
+    Texto = f"{M} {N}\n{' '.join(map(str, ROI_Text))}"
+
+    file_path = os.path.join(ROI_Lookup_Files_Folder, f'Kvazaar_ROI_Lookup_{i}.txt')
+
+    with open(file_path, 'w') as file:
+        file.write(Texto)
+
 
 
 
@@ -339,8 +390,22 @@ class Video_Capturing():
 
 
 #--------------------------------------------------------------Código começa aqui --------------------------------------------------------------------------------------------------
+'''
+#Raw video does not contain info about the picture size, so you have to manually provide it. Also, you must provide the correct pixel format
 
-input_video = "SiyuanGate.mp4"
+input_h265_file = "C:\TCC\AR and VR\Videos\SJTU 8K 360-Degree Video Sequences H265 Lossless\Runners.yuv"
+output_mp4_h265_file = "Runners.mp4"
+
+#Resolução Original: 3840x2160
+
+subprocess.run(['ffmpeg', '-y' ,'-video_size', '3840x2160' , '-pix_fmt',  'yuv420p' ,'-i', input_h265_file,
+                '-vf',  "scale=1920:960:flags=lanczos", '-c:v', 'hevc', "-x265-params", "lossless=1",
+                                                    '-r',  '25', output_mp4_h265_file])
+'''
+
+                                                
+
+input_video = "Runners.mp4"
 #set_Video_360_Metada(input_video)
 
 metadata = get_video_metadata(input_video)

@@ -29,15 +29,6 @@ def get_video_metadata(video_path):
 
 
 #--------------------------------------------------------------Código começa aqui --------------------------------------------------------------------------------------------------
-'''
-#Faz o scaling de um arquivo h265 para 1920x960
-input_h265_file = "C:\TCC\AR and VR\Videos\SJTU 8K 360-Degree Video Sequences H265 Lossless\SiyuanGate.h265"
-output_mp4_h265_file = "SiyuanGate.mp4"
-
-subprocess.run(['ffmpeg', '-y' ,'-i', input_h265_file,
-                '-vf',  "scale=1920:960:flags=lanczos", '-c:v', 'hevc', "-x265-params", "lossless=1",
-                                                    '-r',  '25', '-pix_fmt', 'yuv420p', output_mp4_h265_file])
-'''
 
 
 # Define the input and output video file names
@@ -120,7 +111,7 @@ for i in range(1):
 
     command = [
         "ffmpeg",'-y', "-ss", str(time_window * i), "-t", str(time_window), "-i", input_video,
-        '-c:v', 'libx265','-x265-params',f'qp=32:csv-log-level=2:psnr=1:ssim=1:csv=Encode_Fixed_QP_Log_{i}.csv', output_file_Default
+        '-c:v', 'libx265','-x265-params',f'qpmin=28:qpmax=36:deblock=6:  min-cu-size=8:ctu=64:rd=6:bframes=0:rc-lookahead=0:frame-threads=1: psnr=1:ssim=1:csv-log-level=2:csv=Encode_Fixed_QP_Log_{i}.csv', output_file_Default
     ]
     subprocess.run(command)
 
