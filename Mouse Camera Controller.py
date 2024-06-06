@@ -348,7 +348,7 @@ def Create_Kvazaar_ROI(M,N,i, Atlas):
 
     #A primeira linha contém quantas divisões existirão no eixo X e em seguida no eixo Y
 
-    QP_Offset = 15
+    QP_Offset = 10
     #Lembre-se: o ROI do Kvazaar é em formato raster
     for x in range(M):
         for y in range(N):
