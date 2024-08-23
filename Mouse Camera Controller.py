@@ -3,24 +3,72 @@ import time #Usado para controlar o frame rate do vídeo. TO DO: REMOVE THIS LIB
 import cv2
 import numpy as np
 
+import math
+
 import os#Usado para ler e escrever os arquivos nas pastas corretas
 
 import cProfile#Usado para profiling do código e debuggar bottlenecks
 import subprocess #Usado para rodar a linha de comando
 
-def Calculate_Atlas_per_Frame(M, N, index_Atlas, Atlas, X_Center, Y_Center):
 
-    #A ideia desta função é apenas calcular o atlas para certo frame
-    #Calcula a distância do centro do Gaze_Map para o centro de cada quadrado  
-    for j in range(M):
-        for k in range(N):
-            center_x = (j * piece_width) + piece_width // 2
-            center_y = (k * piece_height) + piece_height // 2
+def Contrast_Threshold(Number_of_X_Tiles, Number_of_Y_Tiles):
 
-            dist_x = min(abs(X_Center - center_x), metadata.get('Width') - abs(X_Center - center_x))
-            #Não existe screen border wrapping no eixo Y
+    #Descobre quantos graus theta e phi tem de uma tile para outra, considerando que o video tenha 360º na horizontal e 180º na vertical
+    Horizontal_Tile_Degrees = (360*(piece_width//2))//metadata.get('Width')
+    Vertical_Tile_Degrees = (180*(piece_height//2))//metadata.get('Height')
 
-            Atlas[j, k, index_Atlas] += np.sqrt(dist_x**2  + (Y_Center - center_y)**2)       
+
+    #Em seguida, esta distancia em graus é usada para calcular a excentricidade
+    Excentricity = Horizontal_Tile_Degrees*Number_of_X_Tiles + Vertical_Tile_Degrees*Number_of_Y_Tiles
+
+    Excentricity = 1/64 * (math.exp(0.106*(1 + Excentricity/2.3)))
+
+    #A constante 0.017372 representa excentricidade igual a 0, ou seja, o individuo olhou diretamente para aquela tile
+    Excentricity = 0.017372 / Excentricity
+    
+
+    return Excentricity
+    
+
+
+def Calculate_Atlas_per_Frame(index_Atlas, Atlas, X_Center, Y_Center):
+
+    #Descubro a tile que estou olhando
+    Tile_X,Tile_Y = X_Center//piece_width, Y_Center//piece_height
+
+    #Para a tile que eu estou olhando, ela ganha +1
+    Atlas[Tile_X, Tile_Y, index_Atlas] += Contrast_Threshold(0,0)
+
+
+    #Para as tiles adjacentes, ela ganha:
+    # CT(Exc) = (1/64)*Exp[0.106*(1 + Exc/2.3)]
+    # spie1998.pdf, equation 1
+
+    for i in range(1,2):
+
+        # Horizontal wrap-around handling
+        left_x = (Tile_X - i) % M
+        right_x = (Tile_X + i) % M
+        
+        # Vertical
+        up_y = (Tile_Y - i) % N
+        down_y = (Tile_Y + i) % N
+
+
+        Atlas[Tile_X, up_y, index_Atlas] += Contrast_Threshold(0,i)#Up
+        Atlas[left_x, up_y, index_Atlas] += Contrast_Threshold(i,i)#Up-Left
+        Atlas[right_x, up_y, index_Atlas] += Contrast_Threshold(i,i)#Up-Right
+
+        Atlas[left_x, Tile_Y, index_Atlas] += Contrast_Threshold(i,0)#Left
+        Atlas[right_x, Tile_Y, index_Atlas] += Contrast_Threshold(i,0)#Right
+
+        Atlas[Tile_X, down_y, index_Atlas] += Contrast_Threshold(0,i)#Bottom
+        Atlas[right_x , down_y, index_Atlas] += Contrast_Threshold(i,i)#Bottom-Right
+        Atlas[left_x, down_y, index_Atlas] += Contrast_Threshold(i,i)#Bottom-Left
+
+
+
+     
 
 
 def Calculate_Heat_Map(video_path, Atlas):
@@ -28,10 +76,6 @@ def Calculate_Heat_Map(video_path, Atlas):
     #Se um Campo de Visao de 360 graus está para 1920 pixels da minha tela,
     #entao, um campo de visao de X graus está para Y = (X * 1920)/360 PIXELS
 
-    #FOV_pxls_X = int( (Campo_de_Visao * 1920) / 360)
-    #FOV_pxls_Y = int(FOV_pxls_X * metadata.get('Height') / metadata.get('Width'))
-
-    #FOV_Y = np.radians(2 * np.arctan(1 / Campo_de_Visao)) -> O VLC calcula o FOV vertical em pixels a partir desta formula
     idx_Atlas = 0
 
     # Load the video
@@ -41,8 +85,8 @@ def Calculate_Heat_Map(video_path, Atlas):
         #As projeçoes equiretangulares não possuem a altura 1080, o que significa que o vídeo possui uma
         #resolução diferente da tela. Por isto, devemos inserir a resolução DA TELA QUE ESTÁ SENDO OBSERVADA
         #frame = cv2.resize(frame, (1920, 1080))
-        if ((frame_number_i % 5) == 0):
-            #Faz o cv2 pegar um a cada 5 frames para reduzir drasticamente o tempo de execução do programa
+        if ((frame_number_i % 12) == 0):
+            #Faz o cv2 pegar um a cada 12 frames para reduzir drasticamente o tempo de execução do programa
             frame = captura_de_video.grab_frame()
         # (x_0, y_0)---------------------------------------------------
         #      |                                                       |  
@@ -57,28 +101,24 @@ def Calculate_Heat_Map(video_path, Atlas):
         #      ----------------------------------------------------(x_1, y_1)
         
 
-        #x_0, y_0 = (Gaze_Map[0][idx_gaze_Map] - FOV_pxls_X // 2, Gaze_Map[1][idx_gaze_Map]  - FOV_pxls_Y // 2)  
-        #x_1, y_1 = (Gaze_Map[0][idx_gaze_Map] + FOV_pxls_X // 2, Gaze_Map[1][idx_gaze_Map]  + FOV_pxls_Y // 2) 
-        #Calculate_Atlas_per_Frame( M, N, idx_Atlas, Atlas, (x_0 + x_1)//2, (y_0 + y_1)//2)
+        Calculate_Atlas_per_Frame(idx_Atlas, Atlas, Gaze_Map[0][frame_number_i], Gaze_Map[1][frame_number_i])
 
-        Calculate_Atlas_per_Frame(M, N, idx_Atlas, Atlas, Gaze_Map[0][frame_number_i], Gaze_Map[1][frame_number_i])
-
-        if (frame_number_i + 1 == ((Numero_de_Frames // K) * (idx_Atlas + 1))):
+        if (frame_number_i + 1 >= ((Numero_de_Frames / K) * (idx_Atlas + 1))):
 
             success, frame = captura_de_video.retrieve_frame()
-            '''
-            Distancia_Maxima = np.max(Atlas[:, :, idx_Atlas])
-            Atlas[:, :, idx_Atlas] = Atlas[:, :, idx_Atlas] / Distancia_Maxima
-            Atlas[:, :, idx_Atlas] = np.round(Atlas[:, :, idx_Atlas], decimals=3)
-            '''
-            Normalize_Atlas(Gaze_Atlas, idx_Atlas)
 
-            Draw_Atlas(M,N,idx_Atlas, Gaze_Atlas, frame)
-            Create_ROI_Lookup_file(M,N,idx_Atlas, Gaze_Atlas)
+            Normalize_Atlas(Atlas, idx_Atlas)
+
+            Draw_Atlas(M,N,idx_Atlas, Atlas, frame)
+
+            #Create_ROI_Lookup_file(M,N,idx_Atlas, Atlas)
+
+            Create_Kvazaar_ROI(M,N,idx_Atlas, Atlas)
 
             idx_Atlas += 1
 
     captura_de_video.stop()
+
     return Atlas
 
 def Normalize_Atlas(Atlas, index_Atlas):
@@ -87,7 +127,7 @@ def Normalize_Atlas(Atlas, index_Atlas):
     Atlas[:, :, index_Atlas] = Atlas[:, :, index_Atlas] / Distancia_Maxima
 
     #Comentar a linha de baixo se estiver o usando o modo automático
-    Atlas[:, :, index_Atlas] = 1 - Atlas[:, :, index_Atlas]
+    #Atlas[:, :, index_Atlas] = 1 - Atlas[:, :, index_Atlas]
 
     Atlas[:, :, index_Atlas] = np.round(Atlas[:, :, index_Atlas], decimals=3)
 
@@ -114,6 +154,29 @@ def Draw_Atlas(M, N, index_Atlas, Atlas, Drawing_frame):
             cv2.putText(Drawing_frame, str(Atlas[j, k, index_Atlas]), (center_x - text_width // 2, center_y - text_height // 2),
                                  font, font_scale, (0, 0, (1-Atlas[j, k, index_Atlas])*255), font_thickness, cv2.LINE_AA)
 
+
+
+
+    '''
+    First argument is the center location (x,y)
+    Next argument is axes lengths (major axis length, minor axis length).
+    The angle of rotation of ellipse in anti-clockwise direction.
+    startAngle and endAngle denotes the starting and ending of ellipse arc measured in clockwise direction from major axis( 0 and 360 gives the full ellipse)
+    Thickness of the elipse. If negative, draw a filled elipse
+    
+    #Elipse de 60 graus
+    cv2.ellipse(Drawing_frame,(120,90),(320,480),0,0,360,(33,33,33),8)
+
+    # 1920 ------- 360º
+    #   x  ------- 60º    -> x = 320 
+
+    # 1440 ------- 180º
+    #   y  ------- 60º    -> y = 480 
+
+    cv2.ellipse(Drawing_frame,(120,90),(240,360),0,0,360,(42,42,42),8)#45 Graus Elipse
+    cv2.ellipse(Drawing_frame,(120,90),(160,240),0,0,360,(70,70,70),8)#30 Graus Elipse
+    cv2.ellipse(Drawing_frame,(120,90),(80,120),0,0,360,(148,148,148),8)#15 Graus Elipse
+    '''
         
     #Se escrevermos o arquivo em .jpg -> 41ms pra escrever por frame
     #Já se escrevermos em .bmp -> 6ms pra escrever por frame
@@ -166,18 +229,17 @@ def Automatic_Video(video_path, tempo):
     #Grave o movimento do mouse
     for i in range(tempo):   
 
-        x, y = Gaze_Map[0][i], Gaze_Map[1][i] = player.video_get_cursor()
+        Gaze_Map[0][i], Gaze_Map[1][i] = player.video_get_cursor()
 
-        #DEBUG TOOL:
-        #x, y = Gaze_Map[0][i], Gaze_Map[1][i] = 4096, 2048
+        #DEBUG TOOL que olha pro centro da projeção 3D, ou seja, Yaw = 90 e Pitch = 45:
+        #Gaze_Map[0][i], Gaze_Map[1][i] = int(metadata.get('Width'))/2, int(metadata.get('Height'))/2
 
-        VLC_Ponto_de_Vista.contents.yaw = map_value(x, x_min, x_max, yaw_min, yaw_max) # -> Equivale a rodar a cabeça da esquerda para direita
-        VLC_Ponto_de_Vista.contents.pitch =  map_value(y, y_min, y_max, pitch_min, pitch_max) # -> Equivale a rodar a cabeça para cima e para baixo
+        VLC_Ponto_de_Vista.contents.yaw = map_value(player.video_get_cursor()[0], x_min, x_max, yaw_min, yaw_max) # -> Equivale a rodar a cabeça da esquerda para direita
+        VLC_Ponto_de_Vista.contents.pitch =  map_value(player.video_get_cursor()[1], y_min, y_max, pitch_min, pitch_max) # -> Equivale a rodar a cabeça para cima e para baixo
 
 
         vlc.libvlc_video_update_viewpoint(player, VLC_Ponto_de_Vista, True)
-        #vlc.libvlc_video_update_viewpoint(player, VLC_Ponto_de_Vista, True) -> Se o ultimo parametro for true, ele troca o viewpoint. Se for false, ele soma ou
-        #                                                                       subtrai o viewpoint
+        #Se o ultimo parametro for true, ele troca o viewpoint. Se for false, ele soma ou subtrai o viewpoint
 
         time.sleep(1/fps)
 
@@ -248,7 +310,7 @@ def Select_Manual_ROI(video_path):
 
     while(K_iterator < K):
         
-        if (cv2.waitKey(1) & 0xFF) == ord('m'):
+        if (cv2.waitKey(5) & 0xFF) == ord('m'):
 
             Normalize_Atlas(Gaze_Atlas, K_iterator)
 
@@ -271,12 +333,10 @@ def Select_Manual_ROI(video_path):
 
         cv2.imshow("Image", frame)
 
-        if cv2.waitKey(1) & 0xFF == 27:
+        if cv2.waitKey(5) & 0xFF == 27:
             break
 
     captura_de_video.stop()
-
-
 
 
 
@@ -352,9 +412,9 @@ def Create_Kvazaar_ROI(M,N,i, Atlas):
     #Lembre-se: o ROI do Kvazaar é em formato raster
     for x in range(M):
         for y in range(N):
-            ROI_Text.append(int(QP_Offset * Atlas[y, x, i]))
+            ROI_Text.append(int(QP_Offset * (1 - Atlas[y, x, i])) )
 
-
+    #Adciona o numero de Colunas e linhas antes do QP OFFset
     Texto = f"{M} {N}\n{' '.join(map(str, ROI_Text))}"
 
     file_path = os.path.join(ROI_Lookup_Files_Folder, f'Kvazaar_ROI_Lookup_{i}.txt')
@@ -362,6 +422,12 @@ def Create_Kvazaar_ROI(M,N,i, Atlas):
     with open(file_path, 'w') as file:
         file.write(Texto)
 
+def set_Video_360_Metada(media):
+
+    subprocess.run(['exiftool', '-XMP-GSpherical:Spherical="true', media])
+    subprocess.run(['exiftool', '-XMP-GSpherical:Stitched="true', media])
+    subprocess.run(['exiftool', '-XMP-GSpherical:StitchingSoftware="Spherical Metadata Tool', media])
+    subprocess.run(['exiftool', '-XMP-GSpherical:ProjectionType="equirectangular', media])
 
 
 
@@ -387,25 +453,26 @@ class Video_Capturing():
 
 
 
-
-
 #--------------------------------------------------------------Código começa aqui --------------------------------------------------------------------------------------------------
-'''
 #Raw video does not contain info about the picture size, so you have to manually provide it. Also, you must provide the correct pixel format
+'''
+input_yuv_file = "C:\TCC\AR and VR\Videos\SouthGate.yuv"
+output_h265_file = "SouthGate.mp4"
 
-input_h265_file = "C:\TCC\AR and VR\Videos\SJTU 8K 360-Degree Video Sequences H265 Lossless\Runners.yuv"
-output_mp4_h265_file = "Runners.mp4"
+#In addition, the aspect ratio of 360-degree immersive video is 2:1, rather than 16:9, so the definition of the resolution is different to traditional
+#video, which the 4K resolution is defined as 4096x2048
+#pixels and 8K as 8192x4096 pixels.
+#liu2017.pdf
 
-#Resolução Original: 3840x2160
-
-subprocess.run(['ffmpeg', '-y' ,'-video_size', '3840x2160' , '-pix_fmt',  'yuv420p' ,'-i', input_h265_file,
+subprocess.run(['ffmpeg', '-y' ,'-video_size', '8192x4096' , '-pix_fmt',  'yuv420p' ,'-i', input_yuv_file,
                 '-vf',  "scale=1920:960:flags=lanczos", '-c:v', 'hevc', "-x265-params", "lossless=1",
-                                                    '-r',  '25', output_mp4_h265_file])
+                                                    '-r',  '25', output_h265_file])
 '''
 
                                                 
 
-input_video = "Runners.mp4"
+input_video = "SouthGate.mp4"
+# 1920x1440
 #set_Video_360_Metada(input_video)
 
 metadata = get_video_metadata(input_video)
@@ -416,8 +483,8 @@ Intermediate_Files_Folder = os.path.join(Diretorio_Atual, 'Intermediate Files')
 ROI_Lookup_Files_Folder = os.path.join(Diretorio_Atual, 'ROI Lookup Files')
 
 
-Numero_de_Frames = int(metadata.get('duration') * metadata.get('frame_rate'))
-#Numero_de_Frames = 25*12
+#Numero_de_Frames = int(metadata.get('duration') * metadata.get('frame_rate'))
+Numero_de_Frames = 25*12
 
 
 #A variável Gaze Map captura a cada frame o centro da tela para onde a pessoa está olhando
@@ -430,7 +497,7 @@ Gaze_Map = [gaze_Map_X, gaze_Map_Y]
 # "K" é o número de "Gaze Atlas" que queremos criar. Podemos ter um Gaze_Atlas para 0 a 30s e outro para 30 a 60s
 # "M" é o número de Colunas
 # "N" é o número de Linhas
-(M, N, K) = 8,8,6
+(M, N, K) = 6,6,6
 Gaze_Atlas = np.zeros((M, N, K))
 
 #Tamanho do pedaço da Região de Interesse
@@ -440,12 +507,12 @@ piece_frame_time = Numero_de_Frames // K
 
 
 #Define o campo de visão a ser usado no vídeo
-Campo_de_Visao = 90
+Campo_de_Visao = 120
 
-Select_Manual_ROI(input_video)
+#Select_Manual_ROI(input_video)
 
-#Automatic_Video(input_video, Numero_de_Frames)
+Automatic_Video(input_video, Numero_de_Frames)
 
 #cProfile.run('Gaze_Atlas = Calculate_Heat_Map(input_video, Gaze_Atlas)')
 
-#Gaze_Atlas = Calculate_Heat_Map(input_video, Gaze_Atlas)
+Gaze_Atlas = Calculate_Heat_Map(input_video, Gaze_Atlas)
