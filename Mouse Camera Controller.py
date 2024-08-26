@@ -451,11 +451,9 @@ class Video_Capturing():
         cv2.destroyAllWindows()
 
 
-
-
 #--------------------------------------------------------------Código começa aqui --------------------------------------------------------------------------------------------------
 #Raw video does not contain info about the picture size, so you have to manually provide it. Also, you must provide the correct pixel format
-'''
+
 input_yuv_file = "C:\TCC\AR and VR\Videos\SouthGate.yuv"
 output_h265_file = "SouthGate.mp4"
 
@@ -463,10 +461,17 @@ output_h265_file = "SouthGate.mp4"
 #video, which the 4K resolution is defined as 4096x2048
 #pixels and 8K as 8192x4096 pixels.
 #liu2017.pdf
-
+'''
 subprocess.run(['ffmpeg', '-y' ,'-video_size', '8192x4096' , '-pix_fmt',  'yuv420p' ,'-i', input_yuv_file,
                 '-vf',  "scale=1920:960:flags=lanczos", '-c:v', 'hevc', "-x265-params", "lossless=1",
                                                     '-r',  '25', output_h265_file])
+
+
+
+subprocess.run(['ffmpeg','-video_size', '8192x4096' , '-pix_fmt',  'yuv420p' ,'-i', input_yuv_file,
+                '-vf', 'scale=4096x2048:flags=lanczos', '-pix_fmt', 'yuv420p', 'SouthGateYUV420-4096x2048.yuv'])
+
+
 '''
 
                                                 
@@ -497,7 +502,7 @@ Gaze_Map = [gaze_Map_X, gaze_Map_Y]
 # "K" é o número de "Gaze Atlas" que queremos criar. Podemos ter um Gaze_Atlas para 0 a 30s e outro para 30 a 60s
 # "M" é o número de Colunas
 # "N" é o número de Linhas
-(M, N, K) = 6,6,6
+(M, N, K) = 8,8,6
 Gaze_Atlas = np.zeros((M, N, K))
 
 #Tamanho do pedaço da Região de Interesse
@@ -509,10 +514,10 @@ piece_frame_time = Numero_de_Frames // K
 #Define o campo de visão a ser usado no vídeo
 Campo_de_Visao = 120
 
-#Select_Manual_ROI(input_video)
+Select_Manual_ROI(input_video)
 
-Automatic_Video(input_video, Numero_de_Frames)
+#Automatic_Video(input_video, Numero_de_Frames)
 
 #cProfile.run('Gaze_Atlas = Calculate_Heat_Map(input_video, Gaze_Atlas)')
 
-Gaze_Atlas = Calculate_Heat_Map(input_video, Gaze_Atlas)
+#Gaze_Atlas = Calculate_Heat_Map(input_video, Gaze_Atlas)
